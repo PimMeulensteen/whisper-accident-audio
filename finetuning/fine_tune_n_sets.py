@@ -109,6 +109,10 @@ def main():
         task="transcribe"
     )
 
+    ds_ls = []
+    ds_atcod = []
+    ds_atco = []
+
     # load datasets
     if SET in ['ls', 'all', 'ls-atcod']:
         ds_ls = load_dataset_splits("pwmm/LS-dev-other-mbr-vocals-fv4-gabox")

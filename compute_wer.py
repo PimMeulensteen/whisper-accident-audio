@@ -24,7 +24,7 @@ def process_pair(ref_path: str, hyp_path: str, show_diff: bool):
         print(f"Error: couldn't compute WER for {hyp_path}.", file=sys.stderr)
         return
 
-    print(f"{os.path.basename(hyp_path):>35} | WER: {wer_score:>6.2%} | CER: {cer_score:>6.2%}")
+    print(f"{os.path.basename(hyp_path):>35} | {wer_score:<6.4} & {cer_score:<6.4}")
     if show_diff:
         print_colored_diff(reference_text, hypothesis_text)
 
@@ -46,6 +46,8 @@ if __name__ == "__main__":
     show_diff = args.diff
 
     if os.path.isdir(hyp_path):
+        print(hyp_path)
+        print("                               Name |  WER  |  CER")
         for fname in sorted(os.listdir(hyp_path)):
             if not fname.lower().endswith('.txt'):
                 continue
