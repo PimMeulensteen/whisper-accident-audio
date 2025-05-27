@@ -1,3 +1,5 @@
+import argparse
+import os
 import torch
 from dataclasses import dataclass
 from typing import Any, Dict, List
@@ -14,6 +16,30 @@ from transformers import (
 import evaluate
 from accelerate import init_empty_weights, infer_auto_device_map
 from peft import LoraConfig, get_peft_model
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Fine-tune Whisper with LoRA on specified dataset splits.")
+    parser.add_argument(
+        "--num-epochs", "-e",
+        type=int,
+        default=5,
+        help="Number of training epochs",
+    )
+    parser.add_argument(
+        "--set", "-s",
+        type=str,
+        choices=["ls", "atco", "atcod", "all", "ls-atcod"],
+        default="all",
+        help="Dataset split to use",
+    )
+    parser.add_argument(
+        "--gpu-id", "-g",
+        type=int,
+        default=0,
+        help="CUDA GPU id to use (as in CUDA_VISIBLE_DEVICES)",
+    )
+    return parser.parse_args()
 
 
 def load_dataset_splits(
@@ -58,12 +84,10 @@ class DataCollatorSpeechWithPadding:
         self,
         features: List[Dict[str, Any]]
     ) -> Dict[str, torch.Tensor]:
-        # Pad audio inputs and cast to float16 to match model bias dtype
         audio_inputs = [{"input_features": f["input_features"]} for f in features]
         batch = self.processor.feature_extractor.pad(audio_inputs, return_tensors="pt")
         batch["input_features"] = batch["input_features"].to(torch.float16)
 
-        # Pad labels and replace pad_token_id with -100
         label_inputs = [{"input_ids": f["labels"]} for f in features]
         labels_batch = self.processor.tokenizer.pad(label_inputs, return_tensors="pt")
         labels = labels_batch.input_ids
@@ -72,11 +96,12 @@ class DataCollatorSpeechWithPadding:
         return batch
 
 
-NUM_EPOCH = 5
-SET = 'all'
-
-
 def main():
+    args = parse_args()
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
+    NUM_EPOCH = args.num_epochs
+    SET = args.set
+
     model_name = "openai/whisper-large-v3"
     processor = WhisperProcessor.from_pretrained(
         model_name,
@@ -95,45 +120,32 @@ def main():
         ds_atco = ds_atco.remove_columns(["info"])
 
     if SET == 'all':
-        # Original sizes
-        orig_train_sizes = {
-            "ls": len(ds_ls["train"]),
-            "atco": len(ds_atco["train"]),
-            "atcod": len(ds_atcod["train"])
-        }
-        orig_val_sizes = {
-            "ls": len(ds_ls["validation"]),
-            "atco": len(ds_atco["validation"]),
-            "atcod": len(ds_atcod["validation"])
-        }
+        orig_train_sizes = {k: len(v["train"]) for k, v in [('ls', ds_ls), ('atco', ds_atco), ('atcod', ds_atcod)]}
+        orig_val_sizes = {k: len(v["validation"]) for k, v in [('ls', ds_ls), ('atco', ds_atco), ('atcod', ds_atcod)]}
 
         print(f"Original train sizes: {orig_train_sizes}")
         print(f"Original validation sizes: {orig_val_sizes}")
 
-        # Determine the size of the smallest split
         min_train = min(orig_train_sizes.values())
-        min_val   = min(orig_val_sizes.values())
+        min_val = min(orig_val_sizes.values())
 
         print(f"Resizing each train split to {min_train} examples")
         print(f"Resizing each validation split to {min_val} examples")
 
-        # Sample each dataset down to the smallest size (shuffle for randomness)
         train_samples = [
             split.shuffle(seed=42).select(range(min_train))
-            for split in (ds_ls["train"], ds_atco["train"], ds_atcod["train"])
+            for split in (ds_ls['train'], ds_atco['train'], ds_atcod['train'])
         ]
         val_samples = [
             split.shuffle(seed=42).select(range(min_val))
-            for split in (ds_ls["validation"], ds_atco["validation"], ds_atcod["validation"])
+            for split in (ds_ls['validation'], ds_atco['validation'], ds_atcod['validation'])
         ]
 
-        # Concatenate the balanced splits
         dataset = DatasetDict({
             "train": concatenate_datasets(train_samples),
             "validation": concatenate_datasets(val_samples),
         })
 
-        # Final sizes
         print(f"Combined train size: {len(dataset['train'])} ({len(train_samples)} × {min_train})")
         print(f"Combined validation size: {len(dataset['validation'])} ({len(val_samples)} × {min_val})")
 
@@ -143,12 +155,8 @@ def main():
             "validation": concatenate_datasets([ds_ls["validation"], ds_atcod["validation"]]),
         })
     else:
-        if SET == 'ls':
-            d = ds_ls
-        elif SET =='atco':
-            d = ds_atco
-        else:
-            d = ds_atcod
+        ds_map = {'ls': ds_ls, 'atco': ds_atco, 'atcod': ds_atcod}
+        d = ds_map[SET]
         dataset = DatasetDict({
             "train": d["train"],
             "validation": d["validation"],
@@ -193,9 +201,7 @@ def main():
     # define compute_metrics
     def compute_metrics(eval_pred):
         wer_metric = evaluate.load("wer")
-        # Use processor to decode generated tokens properly for Whisper
         pred_ids = eval_pred.predictions if not isinstance(eval_pred.predictions, tuple) else eval_pred.predictions[0]
-        # decode predictions and references
         pred_str = processor.batch_decode(pred_ids, skip_special_tokens=True)
         labels = eval_pred.label_ids
         labels[labels == -100] = processor.tokenizer.pad_token_id
@@ -203,7 +209,7 @@ def main():
         wer = wer_metric.compute(predictions=pred_str, references=ref_str)
         return {"wer": wer}
 
-# training arguments
+    # training arguments
     training_args = Seq2SeqTrainingArguments(
         output_dir=f"~/respro/finetuned_models/whisper-{SET}-{NUM_EPOCH}",
         per_device_train_batch_size=1,
