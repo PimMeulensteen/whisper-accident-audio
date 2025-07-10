@@ -41,24 +41,12 @@ def transcribe_file(
             feats,
             attention_mask=mask,
             max_length=model.config.max_target_positions,
-            num_beams=5,
+            num_beams=8,
             no_repeat_ngram_size=3,
             language="en"
         )
         text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
         segments.append({"start": start/sr, "end": end/sr, "text": text})
-        # print(text)
-    print(f"Last chunk text: {text}")
-    # print("Starting alignment...", end='')
-    # result = whisperx.align(
-    #     segments,
-    #     align_model,
-    #     metadata,
-    #     audio,
-    #     device,
-    #     return_char_alignments=False
-    # )
-    print(' done!')
 
     basename = os.path.splitext(os.path.basename(file_path))[0]
     out_name = f"{basename}{'-' if suffix else ''}{suffix}.txt"
