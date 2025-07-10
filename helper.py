@@ -1,19 +1,12 @@
 import difflib
 import jiwer
+import re
 
 def clean_str(s):
     s = s.lower()
-    for i, j in ((',', ' '), 
-                 ('\n', ' '),
-                 ('.', ' '), 
-                 ('?', ' '), 
-                 ("'", ''),
-                 ("!", ' '),
-                 ('-',''),
-                 ('  ', ' '),
-                 ('  ', ' '),
-                 ):
-        s = s.replace(i, j)
+    s = re.sub("[^a-zA-Z]", ' ', s)
+    while '  ' in s:
+        s = s.replace('  ', ' ')
     return s.strip()
 
 def compare_transcriptions(reference_text: str, hypothesis_text: str):
