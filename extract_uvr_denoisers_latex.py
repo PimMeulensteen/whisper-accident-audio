@@ -52,7 +52,7 @@ for model_type in available_models:
             stems_str = ", ".join(stems)
         
         # Determine status: accepted if "no noise" or "vocals" is in stems.
-        if "no noise" in stems or "vocals" in stems:
+        if all(not i in stems for i in ["reverb","echo", "crowd", "drums", "bass", "dry", "kick", "woodwinds","no instrumental","male","aspiration", "drum-bass"]):
             status = "accepted"
         else:
             status = "rejected"
